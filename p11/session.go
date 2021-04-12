@@ -1,7 +1,9 @@
 package p11
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/llkennedy/pkcs11"
@@ -47,19 +49,19 @@ type Session interface {
 	// Encrypt encrypts data
 	Encrypt(encryptionKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error)
 	// EncryptSegmented encrypts multiple data segments individually then one final one, for those few mechanisms where it matters
-	EncryptSegmented(encryptionKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error)
+	EncryptSegmented(ctx context.Context, encryptionKey Object, m []*pkcs11.Mechanism, messageParts <-chan []byte, final <-chan struct{}) (<-chan []byte, <-chan error)
 	// Decrypt decrypts data
 	Decrypt(encryptionKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error)
 	// DecryptSegmented decrypts multiple data segments individually then one final one, for those few mechanisms where it matters
-	DecryptSegmented(encryptionKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error)
+	DecryptSegmented(ctx context.Context, encryptionKey Object, m []*pkcs11.Mechanism, messageParts <-chan []byte, final <-chan struct{}) (<-chan []byte, <-chan error)
 	// Sign signs a message
 	Sign(signingKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error)
 	// SignSegmented signs multiple data segments individually then one final part, for those few mechanisms where it matters
-	SignSegmented(signingKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, messageFinal []byte) ([]byte, error)
+	SignSegmented(ctx context.Context, signingKey Object, m []*pkcs11.Mechanism, messageParts, final <-chan []byte) (<-chan []byte, <-chan error)
 	// Verify verifies a message and signature
 	Verify(verificationKey Object, m []*pkcs11.Mechanism, message []byte, signature []byte) error
 	// Verify verifies multiple data segments individually then the final signature, for those  few mechanisms where it matters.
-	VerifySegmented(verificationKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, signature []byte) error
+	VerifySegmented(ctx context.Context, verificationKey Object, m []*pkcs11.Mechanism, messageParts, signature <-chan []byte) <-chan error
 	// WrapKey wraps a key
 	WrapKey(wrappingkey Object, m []*pkcs11.Mechanism, key Object) ([]byte, error)
 	// UnwrapKey unwraps a key
@@ -323,25 +325,43 @@ func (s *sessionImpl) Encrypt(encryptionKey Object, m []*pkcs11.Mechanism, messa
 	return s.ctx.Encrypt(s.handle, message)
 }
 
-func (s *sessionImpl) EncryptSegmented(encryptionKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error) {
-	s.Lock()
-	defer s.Unlock()
-	err := s.ctx.EncryptInit(s.handle, m, encryptionKey.objectHandle)
-	if err != nil {
-		return nil, nil, err
-	}
-	data := make([][]byte, len(messageParts))
-	for i, part := range messageParts {
-		data[i], err = s.ctx.EncryptUpdate(s.handle, part)
+func (s *sessionImpl) EncryptSegmented(ctx context.Context, encryptionKey Object, m []*pkcs11.Mechanism, messageParts <-chan []byte, final <-chan struct{}) (<-chan []byte, <-chan error) {
+	resOut := make(chan []byte, 1000)
+	errOut := make(chan error, 1)
+	done := ctx.Done()
+	go func() {
+		s.Lock()
+		defer s.Unlock()
+		defer close(resOut)
+		defer close(errOut)
+		err := s.ctx.EncryptInit(s.handle, m, encryptionKey.objectHandle)
 		if err != nil {
-			return nil, nil, err
+			errOut <- err
+			return
 		}
-	}
-	dataFinal, err := s.ctx.EncryptFinal(s.handle)
-	if err != nil {
-		return nil, nil, err
-	}
-	return data, dataFinal, nil
+		for {
+			select {
+			case <-done:
+				errOut <- fmt.Errorf("context canceled")
+				return
+			case <-final:
+				dataFinal, err := s.ctx.EncryptFinal(s.handle)
+				if err != nil {
+					errOut <- err
+					return
+				}
+				resOut <- dataFinal
+			case messagePart := <-messageParts:
+				data, err := s.ctx.EncryptUpdate(s.handle, messagePart)
+				if err != nil {
+					errOut <- err
+					return
+				}
+				resOut <- data
+			}
+		}
+	}()
+	return resOut, errOut
 }
 
 func (s *sessionImpl) Decrypt(encryptionKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error) {
@@ -354,25 +374,43 @@ func (s *sessionImpl) Decrypt(encryptionKey Object, m []*pkcs11.Mechanism, messa
 	return s.ctx.Decrypt(s.handle, message)
 }
 
-func (s *sessionImpl) DecryptSegmented(encryptionKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error) {
-	s.Lock()
-	defer s.Unlock()
-	err := s.ctx.DecryptInit(s.handle, m, encryptionKey.objectHandle)
-	if err != nil {
-		return nil, nil, err
-	}
-	data := make([][]byte, len(messageParts))
-	for i, part := range messageParts {
-		data[i], err = s.ctx.DecryptUpdate(s.handle, part)
+func (s *sessionImpl) DecryptSegmented(ctx context.Context, encryptionKey Object, m []*pkcs11.Mechanism, messageParts <-chan []byte, final <-chan struct{}) (<-chan []byte, <-chan error) {
+	resOut := make(chan []byte, 1000)
+	errOut := make(chan error, 1)
+	done := ctx.Done()
+	go func() {
+		s.Lock()
+		defer s.Unlock()
+		defer close(resOut)
+		defer close(errOut)
+		err := s.ctx.DecryptInit(s.handle, m, encryptionKey.objectHandle)
 		if err != nil {
-			return nil, nil, err
+			errOut <- err
+			return
 		}
-	}
-	dataFinal, err := s.ctx.DecryptFinal(s.handle)
-	if err != nil {
-		return nil, nil, err
-	}
-	return data, dataFinal, nil
+		for {
+			select {
+			case <-done:
+				errOut <- fmt.Errorf("context canceled")
+				return
+			case <-final:
+				dataFinal, err := s.ctx.DecryptFinal(s.handle)
+				if err != nil {
+					errOut <- err
+					return
+				}
+				resOut <- dataFinal
+			case messagePart := <-messageParts:
+				data, err := s.ctx.DecryptUpdate(s.handle, messagePart)
+				if err != nil {
+					errOut <- err
+					return
+				}
+				resOut <- data
+			}
+		}
+	}()
+	return resOut, errOut
 }
 
 func (s *sessionImpl) Sign(signingKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error) {
@@ -385,24 +423,42 @@ func (s *sessionImpl) Sign(signingKey Object, m []*pkcs11.Mechanism, message []b
 	return s.ctx.Sign(s.handle, message)
 }
 
-func (s *sessionImpl) SignSegmented(signingKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, messageFinal []byte) ([]byte, error) {
-	s.Lock()
-	defer s.Unlock()
-	err := s.ctx.SignInit(s.handle, m, signingKey.objectHandle)
-	if err != nil {
-		return nil, err
-	}
-	for _, part := range messageParts {
-		err = s.ctx.SignUpdate(s.handle, part)
+func (s *sessionImpl) SignSegmented(ctx context.Context, signingKey Object, m []*pkcs11.Mechanism, messageParts, final <-chan []byte) (<-chan []byte, <-chan error) {
+	resOut := make(chan []byte, 1)
+	errOut := make(chan error, 1)
+	done := ctx.Done()
+	go func() {
+		s.Lock()
+		defer s.Unlock()
+		defer close(resOut)
+		defer close(errOut)
+		err := s.ctx.SignInit(s.handle, m, signingKey.objectHandle)
 		if err != nil {
-			return nil, err
+			errOut <- err
+			return
 		}
-	}
-	data, err := s.ctx.SignFinal(s.handle)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+		for {
+			select {
+			case <-done:
+				errOut <- fmt.Errorf("context canceled")
+				return
+			case <-final:
+				dataFinal, err := s.ctx.SignFinal(s.handle)
+				if err != nil {
+					errOut <- err
+					return
+				}
+				resOut <- dataFinal
+			case messagePart := <-messageParts:
+				err := s.ctx.SignUpdate(s.handle, messagePart)
+				if err != nil {
+					errOut <- err
+					return
+				}
+			}
+		}
+	}()
+	return resOut, errOut
 }
 
 func (s *sessionImpl) Verify(verificationKey Object, m []*pkcs11.Mechanism, message []byte, signature []byte) error {
@@ -415,18 +471,34 @@ func (s *sessionImpl) Verify(verificationKey Object, m []*pkcs11.Mechanism, mess
 	return s.ctx.Verify(s.handle, message, signature)
 }
 
-func (s *sessionImpl) VerifySegmented(verificationKey Object, m []*pkcs11.Mechanism, messageParts [][]byte, signature []byte) error {
-	s.Lock()
-	defer s.Unlock()
-	err := s.ctx.VerifyInit(s.handle, m, verificationKey.objectHandle)
-	if err != nil {
-		return err
-	}
-	for _, part := range messageParts {
-		err = s.ctx.VerifyUpdate(s.handle, part)
+func (s *sessionImpl) VerifySegmented(ctx context.Context, verificationKey Object, m []*pkcs11.Mechanism, messageParts, signature <-chan []byte) <-chan error {
+	errOut := make(chan error, 1)
+	done := ctx.Done()
+	go func() {
+		s.Lock()
+		defer s.Unlock()
+		defer close(errOut)
+		err := s.ctx.VerifyInit(s.handle, m, verificationKey.objectHandle)
 		if err != nil {
-			return err
+			errOut <- err
+			return
 		}
-	}
-	return s.ctx.VerifyFinal(s.handle, signature)
+		for {
+			select {
+			case <-done:
+				errOut <- fmt.Errorf("context canceled")
+				return
+			case sig := <-signature:
+				errOut <- s.ctx.VerifyFinal(s.handle, sig)
+				return
+			case messagePart := <-messageParts:
+				err := s.ctx.VerifyUpdate(s.handle, messagePart)
+				if err != nil {
+					errOut <- err
+					return
+				}
+			}
+		}
+	}()
+	return errOut
 }
