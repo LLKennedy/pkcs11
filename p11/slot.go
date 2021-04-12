@@ -58,7 +58,7 @@ func (s Slot) Mechanisms() ([]Mechanism, error) {
 	result := make([]Mechanism, len(list))
 	for i, mech := range list {
 		result[i] = Mechanism{
-			mechanism: mech,
+			Mechanism: mech,
 			slot:      s,
 		}
 	}
@@ -87,11 +87,11 @@ func (s Slot) ID() uint {
 // Mechanism represents a cipher, signature algorithm, hash function, or other
 // function that a token can perform.
 type Mechanism struct {
-	mechanism *pkcs11.Mechanism
+	Mechanism *pkcs11.Mechanism
 	slot      Slot
 }
 
 // Info returns information about this mechanism.
 func (m *Mechanism) Info() (pkcs11.MechanismInfo, error) {
-	return m.slot.ctx.GetMechanismInfo(m.slot.id, []*pkcs11.Mechanism{m.mechanism})
+	return m.slot.ctx.GetMechanismInfo(m.slot.id, []*pkcs11.Mechanism{m.Mechanism})
 }
