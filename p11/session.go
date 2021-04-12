@@ -44,6 +44,30 @@ type Session interface {
 	GenerateRandom(length int) ([]byte, error)
 	// GenerateKey generates a secret key.
 	GenerateKey(request GenerateKeyRequest) (*SecretKey, error)
+	// Encrypt encrypts data
+	Encrypt(m []*pkcs11.Mechanism, encryptionKey Object, message []byte) ([]byte, error)
+	// EncryptSegmented encrypts multiple data segments individually then one final one, for those few mechanisms where it matters
+	EncryptSegmented(m []*pkcs11.Mechanism, encryptionKey Object, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error)
+	// Decrypt decrypts data
+	Decrypt(m []*pkcs11.Mechanism, encryptionKey Object, message []byte) ([]byte, error)
+	// DecryptSegmented decrypts multiple data segments individually then one final one, for those few mechanisms where it matters
+	DecryptSegmented(m []*pkcs11.Mechanism, encryptionKey Object, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error)
+	// Sign signs a message
+	Sign(m []*pkcs11.Mechanism, signingKey Object, message []byte) ([]byte, error)
+	// SignSegmented signs multiple data segments individually then one final part, for those few mechanisms where it matters
+	SignSegmented(m []*pkcs11.Mechanism, signingKey Object, messageParts [][]byte, messageFinal []byte) ([]byte, error)
+	// Verify verifies a message and signature
+	Verify(m []*pkcs11.Mechanism, verificationKey Object, message []byte, signature []byte) error
+	// Verify verifies multiple data segments individually then the final signature, for those  few mechanisms where it matters.
+	VerifySegmented(m []*pkcs11.Mechanism, verificationKey Object, messageParts [][]byte, signature []byte) error
+	// WrapKey wraps a key
+	WrapKey(m []*pkcs11.Mechanism, wrappingkey Object, key Object) ([]byte, error)
+	// UnwrapKey unwraps a key
+	UnwrapKey(m []*pkcs11.Mechanism, unwrappingkey Object, wrappedkey []byte, a []*pkcs11.Attribute) (*Object, error)
+	// DestroyObject destroys an object
+	DestroyObject(Object) error
+	// CopyObject copies an object with new attributes if possible
+	CopyObject(o Object, temp []*pkcs11.Attribute) (*Object, error)
 
 	// InitPIN initialize's the normal user's PIN.
 	InitPIN(pin string) error
@@ -249,4 +273,160 @@ func (s *sessionImpl) GenerateKey(request GenerateKeyRequest) (*SecretKey, error
 		session:      s,
 		objectHandle: newHandle,
 	}), nil
+}
+
+func (s *sessionImpl) WrapKey(m []*pkcs11.Mechanism, wrappingkey Object, key Object) ([]byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	return s.ctx.WrapKey(s.handle, m, wrappingkey.objectHandle, key.objectHandle)
+}
+
+func (s *sessionImpl) UnwrapKey(m []*pkcs11.Mechanism, unwrappingkey Object, wrappedkey []byte, a []*pkcs11.Attribute) (*Object, error) {
+	s.Lock()
+	defer s.Unlock()
+	obj, err := s.ctx.UnwrapKey(s.handle, m, unwrappingkey.objectHandle, wrappedkey, a)
+	if err != nil {
+		return nil, err
+	}
+	return &Object{
+		session:      s,
+		objectHandle: obj,
+	}, nil
+}
+
+func (s *sessionImpl) DestroyObject(o Object) error {
+	s.Lock()
+	defer s.Unlock()
+	return s.ctx.DestroyObject(s.handle, o.objectHandle)
+}
+
+func (s *sessionImpl) CopyObject(o Object, temp []*pkcs11.Attribute) (*Object, error) {
+	s.Lock()
+	defer s.Unlock()
+	obj, err := s.ctx.CopyObject(s.handle, o.objectHandle, temp)
+	if err != nil {
+		return nil, err
+	}
+	return &Object{
+		session:      s,
+		objectHandle: obj,
+	}, nil
+}
+
+func (s *sessionImpl) Encrypt(m []*pkcs11.Mechanism, encryptionKey Object, message []byte) ([]byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.EncryptInit(s.handle, m, encryptionKey.objectHandle)
+	if err != nil {
+		return nil, err
+	}
+	return s.ctx.Encrypt(s.handle, message)
+}
+
+func (s *sessionImpl) EncryptSegmented(m []*pkcs11.Mechanism, encryptionKey Object, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.EncryptInit(s.handle, m, encryptionKey.objectHandle)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := make([][]byte, len(messageParts))
+	for i, part := range messageParts {
+		data[i], err = s.ctx.EncryptUpdate(s.handle, part)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	dataFinal, err := s.ctx.EncryptFinal(s.handle)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, dataFinal, nil
+}
+
+func (s *sessionImpl) Decrypt(m []*pkcs11.Mechanism, encryptionKey Object, message []byte) ([]byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.DecryptInit(s.handle, m, encryptionKey.objectHandle)
+	if err != nil {
+		return nil, err
+	}
+	return s.ctx.Decrypt(s.handle, message)
+}
+
+func (s *sessionImpl) DecryptSegmented(m []*pkcs11.Mechanism, encryptionKey Object, messageParts [][]byte, messageFinal []byte) ([][]byte, []byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.DecryptInit(s.handle, m, encryptionKey.objectHandle)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := make([][]byte, len(messageParts))
+	for i, part := range messageParts {
+		data[i], err = s.ctx.DecryptUpdate(s.handle, part)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	dataFinal, err := s.ctx.DecryptFinal(s.handle)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, dataFinal, nil
+}
+
+func (s *sessionImpl) Sign(m []*pkcs11.Mechanism, signingKey Object, message []byte) ([]byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.SignInit(s.handle, m, signingKey.objectHandle)
+	if err != nil {
+		return nil, err
+	}
+	return s.ctx.Sign(s.handle, message)
+}
+
+func (s *sessionImpl) SignSegmented(m []*pkcs11.Mechanism, signingKey Object, messageParts [][]byte, messageFinal []byte) ([]byte, error) {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.SignInit(s.handle, m, signingKey.objectHandle)
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range messageParts {
+		err = s.ctx.SignUpdate(s.handle, part)
+		if err != nil {
+			return nil, err
+		}
+	}
+	data, err := s.ctx.SignFinal(s.handle)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *sessionImpl) Verify(m []*pkcs11.Mechanism, verificationKey Object, message []byte, signature []byte) error {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.VerifyInit(s.handle, m, verificationKey.objectHandle)
+	if err != nil {
+		return err
+	}
+	return s.ctx.Verify(s.handle, message, signature)
+}
+
+func (s *sessionImpl) VerifySegmented(m []*pkcs11.Mechanism, verificationKey Object, messageParts [][]byte, signature []byte) error {
+	s.Lock()
+	defer s.Unlock()
+	err := s.ctx.VerifyInit(s.handle, m, verificationKey.objectHandle)
+	if err != nil {
+		return err
+	}
+	for _, part := range messageParts {
+		err = s.ctx.VerifyUpdate(s.handle, part)
+		if err != nil {
+			return err
+		}
+	}
+	return s.ctx.VerifyFinal(s.handle, signature)
 }
