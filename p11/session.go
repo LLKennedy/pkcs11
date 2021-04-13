@@ -149,7 +149,7 @@ func (s *sessionImpl) FindObjects(template []*pkcs11.Attribute) ([]Object, error
 		for j, objectHandle := range objectHandles {
 			results[i+j] = Object{
 				session:      s,
-				objectHandle: objectHandle,
+				ObjectHandle: objectHandle,
 			}
 		}
 	}
@@ -202,7 +202,7 @@ func (s *sessionImpl) CreateObject(template []*pkcs11.Attribute) (Object, error)
 	}
 	return Object{
 		session:      s,
-		objectHandle: oh,
+		ObjectHandle: oh,
 	}, nil
 }
 
@@ -246,11 +246,11 @@ func (s *sessionImpl) GenerateKeyPair(request GenerateKeyPairRequest) (*KeyPair,
 	return &KeyPair{
 		Public: PublicKey(Object{
 			session:      s,
-			objectHandle: pubHandle,
+			ObjectHandle: pubHandle,
 		}),
 		Private: PrivateKey(Object{
 			session:      s,
-			objectHandle: privHandle,
+			ObjectHandle: privHandle,
 		}),
 	}, nil
 }
@@ -273,52 +273,52 @@ func (s *sessionImpl) GenerateKey(request GenerateKeyRequest) (*SecretKey, error
 	}
 	return (*SecretKey)(&Object{
 		session:      s,
-		objectHandle: newHandle,
+		ObjectHandle: newHandle,
 	}), nil
 }
 
 func (s *sessionImpl) WrapKey(wrappingkey Object, m []*pkcs11.Mechanism, key Object) ([]byte, error) {
 	s.Lock()
 	defer s.Unlock()
-	return s.ctx.WrapKey(s.handle, m, wrappingkey.objectHandle, key.objectHandle)
+	return s.ctx.WrapKey(s.handle, m, wrappingkey.ObjectHandle, key.ObjectHandle)
 }
 
 func (s *sessionImpl) UnwrapKey(unwrappingkey Object, m []*pkcs11.Mechanism, wrappedkey []byte, a []*pkcs11.Attribute) (*Object, error) {
 	s.Lock()
 	defer s.Unlock()
-	obj, err := s.ctx.UnwrapKey(s.handle, m, unwrappingkey.objectHandle, wrappedkey, a)
+	obj, err := s.ctx.UnwrapKey(s.handle, m, unwrappingkey.ObjectHandle, wrappedkey, a)
 	if err != nil {
 		return nil, err
 	}
 	return &Object{
 		session:      s,
-		objectHandle: obj,
+		ObjectHandle: obj,
 	}, nil
 }
 
 func (s *sessionImpl) DestroyObject(o Object) error {
 	s.Lock()
 	defer s.Unlock()
-	return s.ctx.DestroyObject(s.handle, o.objectHandle)
+	return s.ctx.DestroyObject(s.handle, o.ObjectHandle)
 }
 
 func (s *sessionImpl) CopyObject(o Object, temp []*pkcs11.Attribute) (*Object, error) {
 	s.Lock()
 	defer s.Unlock()
-	obj, err := s.ctx.CopyObject(s.handle, o.objectHandle, temp)
+	obj, err := s.ctx.CopyObject(s.handle, o.ObjectHandle, temp)
 	if err != nil {
 		return nil, err
 	}
 	return &Object{
 		session:      s,
-		objectHandle: obj,
+		ObjectHandle: obj,
 	}, nil
 }
 
 func (s *sessionImpl) Encrypt(encryptionKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error) {
 	s.Lock()
 	defer s.Unlock()
-	err := s.ctx.EncryptInit(s.handle, m, encryptionKey.objectHandle)
+	err := s.ctx.EncryptInit(s.handle, m, encryptionKey.ObjectHandle)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +334,7 @@ func (s *sessionImpl) EncryptSegmented(ctx context.Context, encryptionKey Object
 		defer s.Unlock()
 		defer close(resOut)
 		defer close(errOut)
-		err := s.ctx.EncryptInit(s.handle, m, encryptionKey.objectHandle)
+		err := s.ctx.EncryptInit(s.handle, m, encryptionKey.ObjectHandle)
 		if err != nil {
 			errOut <- err
 			return
@@ -367,7 +367,7 @@ func (s *sessionImpl) EncryptSegmented(ctx context.Context, encryptionKey Object
 func (s *sessionImpl) Decrypt(encryptionKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error) {
 	s.Lock()
 	defer s.Unlock()
-	err := s.ctx.DecryptInit(s.handle, m, encryptionKey.objectHandle)
+	err := s.ctx.DecryptInit(s.handle, m, encryptionKey.ObjectHandle)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +383,7 @@ func (s *sessionImpl) DecryptSegmented(ctx context.Context, encryptionKey Object
 		defer s.Unlock()
 		defer close(resOut)
 		defer close(errOut)
-		err := s.ctx.DecryptInit(s.handle, m, encryptionKey.objectHandle)
+		err := s.ctx.DecryptInit(s.handle, m, encryptionKey.ObjectHandle)
 		if err != nil {
 			errOut <- err
 			return
@@ -416,7 +416,7 @@ func (s *sessionImpl) DecryptSegmented(ctx context.Context, encryptionKey Object
 func (s *sessionImpl) Sign(signingKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error) {
 	s.Lock()
 	defer s.Unlock()
-	err := s.ctx.SignInit(s.handle, m, signingKey.objectHandle)
+	err := s.ctx.SignInit(s.handle, m, signingKey.ObjectHandle)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +432,7 @@ func (s *sessionImpl) SignSegmented(ctx context.Context, signingKey Object, m []
 		defer s.Unlock()
 		defer close(resOut)
 		defer close(errOut)
-		err := s.ctx.SignInit(s.handle, m, signingKey.objectHandle)
+		err := s.ctx.SignInit(s.handle, m, signingKey.ObjectHandle)
 		if err != nil {
 			errOut <- err
 			return
@@ -464,7 +464,7 @@ func (s *sessionImpl) SignSegmented(ctx context.Context, signingKey Object, m []
 func (s *sessionImpl) Verify(verificationKey Object, m []*pkcs11.Mechanism, message []byte, signature []byte) error {
 	s.Lock()
 	defer s.Unlock()
-	err := s.ctx.VerifyInit(s.handle, m, verificationKey.objectHandle)
+	err := s.ctx.VerifyInit(s.handle, m, verificationKey.ObjectHandle)
 	if err != nil {
 		return err
 	}
@@ -478,7 +478,7 @@ func (s *sessionImpl) VerifySegmented(ctx context.Context, verificationKey Objec
 		s.Lock()
 		defer s.Unlock()
 		defer close(errOut)
-		err := s.ctx.VerifyInit(s.handle, m, verificationKey.objectHandle)
+		err := s.ctx.VerifyInit(s.handle, m, verificationKey.ObjectHandle)
 		if err != nil {
 			errOut <- err
 			return
