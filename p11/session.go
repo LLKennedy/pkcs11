@@ -57,7 +57,7 @@ type Session interface {
 	// Sign signs a message
 	Sign(signingKey Object, m []*pkcs11.Mechanism, message []byte) ([]byte, error)
 	// SignSegmented signs multiple data segments individually then one final part, for those few mechanisms where it matters
-	SignSegmented(ctx context.Context, signingKey Object, m []*pkcs11.Mechanism, messageParts, final <-chan []byte) (<-chan []byte, <-chan error)
+	SignSegmented(ctx context.Context, signingKey Object, m []*pkcs11.Mechanism, messageParts <-chan []byte, final <-chan struct{}) (<-chan []byte, <-chan error)
 	// Verify verifies a message and signature
 	Verify(verificationKey Object, m []*pkcs11.Mechanism, message []byte, signature []byte) error
 	// Verify verifies multiple data segments individually then the final signature, for those  few mechanisms where it matters.
@@ -423,7 +423,7 @@ func (s *sessionImpl) Sign(signingKey Object, m []*pkcs11.Mechanism, message []b
 	return s.ctx.Sign(s.handle, message)
 }
 
-func (s *sessionImpl) SignSegmented(ctx context.Context, signingKey Object, m []*pkcs11.Mechanism, messageParts, final <-chan []byte) (<-chan []byte, <-chan error) {
+func (s *sessionImpl) SignSegmented(ctx context.Context, signingKey Object, m []*pkcs11.Mechanism, messageParts <-chan []byte, final <-chan struct{}) (<-chan []byte, <-chan error) {
 	resOut := make(chan []byte, 1)
 	errOut := make(chan error, 1)
 	done := ctx.Done()
